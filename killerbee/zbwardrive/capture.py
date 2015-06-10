@@ -96,3 +96,4 @@ class CaptureThread(threading.Thread):
         self.pd.close()
         print "%d packets captured on channel %d." % (self.packetcount, self.channel)
 
+            

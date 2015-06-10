@@ -30,10 +30,10 @@ if __name__=='__main__':
     args = parser.parse_args()
 
     # try-except block to catch keyboard interrupt.
-    zbdb = None
     gpsp = None
     try:
         # Some shared state for multiprocessing use
+        # RFM: Not really sure hwo this works
         manager = Manager()
         devices = manager.dict()
         currentGPS = None
@@ -42,13 +42,10 @@ if __name__=='__main__':
             gpsp = Process(target=gpsdPoller, args=(currentGPS, ))
             gpsp.start()
 
-        zbdb = ZBScanDB()
         #TODO check return value from startScan
-        startScan(zbdb, currentGPS, verbose=args.verbose, dblog=args.dblog, 
+        startScan(currentGPS, verbose=args.verbose, dblog=args.dblog, 
             agressive=args.agressive, ignore=args.ignore, include=args.include)
-        zbdb.close()
 
     except KeyboardInterrupt:
         print 'Shutting down'
-        if zbdb != None: zbdb.close()
         if gpsp != None: gpsp.terminate()

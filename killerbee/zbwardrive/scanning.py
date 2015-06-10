@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+import datetime
+import multiprocessing
+import Queue
+import time
+
 import sys
 import string
 import socket
@@ -9,11 +14,11 @@ from killerbee import *
 from db import toHex
 from capture import startCapture
 try:
-	from scapy.all import Dot15d4, Dot15d4Beacon
+    from scapy.all import Dot15d4, Dot15d4Beacon
 except ImportError:
-	print 'This Requires Scapy To Be Installed.'
-	from sys import exit
-	exit(-1)
+    print 'This Requires Scapy To Be Installed.'
+    from sys import exit
+    exit(-1)
 
 #TODO set iteration min to a sensical parameter
 MIN_ITERATIONS_AGRESSIVE = 0
@@ -56,7 +61,7 @@ def doScan_processResponse(packet, channel, zbdb, kbscan, verbose=False, dblog=F
 # --- end of doScan_processResponse ---
 
 # doScan
-def doScan(zbdb, currentGPS, verbose=False, dblog=False, agressive=False, staytime=2):
+def doScan_old(zbdb, currentGPS, verbose=False, dblog=False, agressive=False, staytime=2):
     # Choose a device for injection scanning:
     scannerDevId = zbdb.get_devices_nextFree()
     # log to online mysql db or to some local pcap files?
@@ -145,3 +150,173 @@ def doScan(zbdb, currentGPS, verbose=False, dblog=False, agressive=False, stayti
     zbdb.update_devices_status(scannerDevId, 'Free')
 # --- end of doScan ---
 
+
+# TODO: we're currently skipping using dblog for most things
+class scanner(multiprocessing.Process):
+    def __init__(self, device, channels, verbose, dblog, gps):
+        multiprocessing.Process.__init__(self)
+        # TODO: We're assuming that the device can inject
+        self.dev = KillerBee(device=device[0], datasource=("Wardrive Live" if dblog else None))
+        self.devstring = device[1]
+        self.channels = channels
+        self.channel = None
+        self.verbose = verbose
+        self.gps = gps
+
+    def run(self):
+        try:
+            print "Scanning with {}".format(self.devstring)
+
+            staytime = 2
+            beacon = "\x03\x08\x00\xff\xff\xff\xff\x07" # beacon frame
+            beaconp1 = beacon[0:2]  # beacon part before seqnum field
+            beaconp2 = beacon[3:]   # beacon part after seqnum field
+            # TODO: Do we want to keep sequence numbers unique across devices? 
+            seqnum = 0              # seqnum to use (will cycle)
+
+            while(1):
+                
+                # Try to get the next channel, if there aren't any, sleep and try again
+                # It shouldn't be empty unless there are more devices than channels
+                try:
+                    self.channel = self.channels.get(False)
+                except Queue.Empty():
+                    time.sleep(1)
+                    continue
+
+                # Change channel
+                try:
+                    self.dev.set_channel(self.channel)
+                except Exception as e:
+                    raise Exception('%s: Failed to set channel to %d (%s).' % (self.devstring,self.channel,e))
+                
+                # Send beacon
+                if seqnum > 255:
+                    seqnum = 0
+                beaconinj = beaconp1 + "%c" % seqnum + beaconp2    
+                if self.verbose:
+                    print "{}: Injecting a beacon request on channel {}".format(self.devstring, self.channel)
+                #try:
+                self.dev.inject(beaconinj)
+                #except Exception, e:
+                #    raise Exception('%s: Unable to inject packet (%s).' % (self.devstring,e))
+                
+                # Listen for packets
+                # TODO: Is there a better way to do this?
+                endtime = time.time() + staytime
+                while (endtime > time.time()):
+                    # Get any packets (blocks for 100 usec)
+                    packet = self.dev.pnext()
+                    # TODO: Do we want the validcrc check?
+                    if packet != None:# and packet['validcrc']:
+                        if self.verbose:
+                            print "{}: Found a frame on channel {}".format(self.devstring, self.channel)
+                        self.capture(packet)
+
+                self.dev.sniffer_off()
+                        
+                # Add channel back to the queue
+                self.channels.put(self.channel)
+        except KeyboardInterrupt:
+            print "{}: Keyboard Interrupt. Cleaning up".format(self.devstring)
+            
+            # TODO: is this all?
+            # TODO: sniffer off
+            self.dev.close()
+            
+            return
+
+
+    # Captures packets
+    # TODO: Make sure the first packet's metadata isn't too drifted
+    # TODO: try/except for keyboardinterrupt
+    def capture(self, packet, staytime=2):
+        rf_freq_mhz = (self.channel - 10) * 5 + 2400
+        packet_count = 1
+        
+        time_label = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M')
+        fname = 'zb_c%s_%s.pcap' % (self.channel, time_label) #fname is -w equiv
+        pd = PcapDumper(DLT_IEEE802_15_4, fname, ppi=True)
+
+        # TODO: make sure below
+        #self.dev.sniffer_on() # The sniffer should already be on
+        print "{}: capturing on channel {}".format(self.devstring, self.channel)
+        
+        # Loop and capture packets
+        first = True
+        endtime = time.time() + staytime
+        while(endtime > time.time()):
+            if first:
+                # skip reading to record the packet we already got
+                first = False
+            else:
+                # Blocks for 100 usec
+                packet = self.dev.pnext()
+                
+            if packet != None:
+                packet_count += 1
+                try:
+                    # Do the GPS if we can
+                    # KB's hack is to use lat to see if all the data is there
+                    if self.gps != None and 'lat' in self.gps:
+                        pd.pcap_dump(packet[0],
+                                     freq_mhz=rf_freq_mhz, ant_dbm=packet['dbm'], 
+                                     location=(self.gps['lng'], self.gps['lat'], self.gps['alt'])   )
+                    else:
+                        pd.pcap_dump(packet[0], freq_mhz=rf_freq_mhz, 
+                                          ant_dbm=packet['dbm'])
+                except IOError as e:
+                    # Below are all killerbee comments
+                    #TODO replace this with code that ensures the captures exit before the manager
+                    #     maybe have a shared memory int that is the number of currently running capture threads,
+                    #     or use a shared state db, and only once all devices are marked free does the manager die
+                    #if e.errno == 32: #broken pipe, likely from manager being shut down
+                    #    continue
+                    #else:
+                    raise e
+        # All done
+        #self.dev.sniffer_off() # gets done later
+        pd.close()
+        print "{}: {} packets captured on channel {}".format(self.devstring, packet_count, self.channel)
+
+                    
+# TODO: how is GPS working?
+def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, staytime=2):
+
+    # Our pool/semaphor hybrid 
+    channels = multiprocessing.Queue()
+
+    for i in range(11,26):
+        channels.put(i)
+    
+    scanners = []
+    
+    for device in devices:
+        pass
+
+    print "{} start".format(devices[0][0])
+    
+    s = scanner(devices[0], channels, verbose, dblog, currentGPS)
+    s.start()
+    scanners.append(s)
+
+    print "{} done".format(devices[0][0])
+    time.sleep(5)
+    print "{} start".format(devices[1][0])
+
+    s = scanner(devices[1], channels, verbose, dblog, currentGPS)
+    s.start()
+    scanners.append(s)
+
+    print "{} done".format(devices[1][0])
+
+    # TODO: better way to handle this
+    try:
+        for s in scanners:
+            s.join()
+    except KeyboardInterrupt:
+        print "doScan() ended by KeyboardInterrupt"
+    finally:
+        while not channels.empty():
+            channels.get()
+    
