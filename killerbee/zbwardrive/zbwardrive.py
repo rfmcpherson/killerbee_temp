@@ -6,12 +6,22 @@
 
 from time import sleep
 from usb import USBError
+from subprocess import call
 
 from killerbee import KillerBee, kbutils
 from db import ZBScanDB
 from scanning import doScan
 
 GPS_FREQUENCY=3 #in seconds
+
+def googLat(lat):
+    return lat > -180.00000005 and lat < 180.00000005:
+
+def goodLng(lng):
+    return goodLat(lng)
+
+def goodAlt(alt):
+    alt > -180000.00005 and alt < 180000.00005
 
 # GPS Poller
 def gpsdPoller(currentGPS):
@@ -20,14 +30,14 @@ def gpsdPoller(currentGPS):
     @arg currentGPS store relavent pieces of up-to-date GPS info
     '''
     import killerbee.zbwardrive.gps
-    import os
-    print os.path.dirname(killerbee.zbwardrive.gps.__file__)
+    import socket
+
     gpsd = killerbee.zbwardrive.gps.gps()
-    #print "type: {}".format(type(gpsd))
-    #methods = [method for method in dir(gpsd)]
-    #print "\n".join(methods)
     gpsd.poll()
     gpsd.stream()
+
+    sock = socket.socket()
+    sock.connect(("127.0.0.1",8080))
 
     try:
         while True:
@@ -36,6 +46,10 @@ def gpsdPoller(currentGPS):
                 lat = gpsd.fix.latitude
                 lng = gpsd.fix.longitude
                 alt = gpsd.fix.altitude
+                if alt:
+                    sock.send("GPS FULL")
+                else:
+                    sock.sock("GPS PARTIAL")
                 #print 'latitude    ' , lat
                 #print 'longitude   ' , lng
                 #TODO do we want to use the GPS time in any way?
@@ -72,9 +86,8 @@ def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[
         print 'Error: Issue starting KillerBee instance:', e
         return False
 
-
-    ignore = "/dev/ttyUSB0"
-    print ignore
+    if verbose:
+        print "gps: {}".format(ignore)
 
     devices = kbutils.devlist(gps=ignore, include=include)
 

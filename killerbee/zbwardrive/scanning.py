@@ -3,7 +3,6 @@
 import datetime
 import multiprocessing
 import Queue
-import RPi.GPIO as GPIO
 import signal
 import time
 import traceback
@@ -156,7 +155,7 @@ def doScan_old(zbdb, currentGPS, verbose=False, dblog=False, agressive=False, st
 
 # TODO: we're currently skipping using dblog for most things
 class scanner(multiprocessing.Process):
-    def __init__(self, device, devstring, channel, channels, verbose, gps, kill):
+    def __init__(self, device, devstring, channel, channels, verbose, gps, kill, name):
         multiprocessing.Process.__init__(self)
         # TODO: We're assuming that the device can inject
         self.dev = device
@@ -166,6 +165,9 @@ class scanner(multiprocessing.Process):
         self.verbose = verbose
         self.gps = gps
         self.kill = kill
+        self.name = name
+        self.sock = socket.socket()
+        self.sock.connect(("127.0.0.1",8080))
 
 
     def run(self):
@@ -274,6 +276,8 @@ class scanner(multiprocessing.Process):
         #    GPIO.output(self.led, False)
         #    time.sleep(0.1)
 
+        self.socket.send("{} RECEIVING".format(self.name)))
+
         rf_freq_mhz = (self.channel.value - 10) * 5 + 2400
         packet_count = 1
         
@@ -361,6 +365,9 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     timeout = 10
     tries_limit = 5
 
+    sock = socket.socket()
+    sock.connect(("127.0.0.1", 8080))
+
     # Our pool/semaphor hybrid 
     channels = multiprocessing.Queue()
 
@@ -368,21 +375,23 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
         channels.put(i)
     
     scanners = []
+    names = ["KB1", "KB2", "KB3"]
 
-    for device in devices:
+    for device, name in zip(devices, names):
         print "Creating {}".format(device[0])
         kill_event = multiprocessing.Event()
         channel = multiprocessing.Value('i',0)
         
         kbdevice = create_device(device[0], timeout, tries_limit)
         
-        scanner_proc = scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event)
+        scanner_proc = scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event, name)
         s = {}
         s["dev"] = kbdevice
         s["devstring"] = device[0]
         s["channel"] = channel
         s["proc"] = scanner_proc
         s["kill"] = kill_event
+        s["name"] = name
 
         scanners.append(s)
 
@@ -394,6 +403,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     try:
         while 1:
             for i, s in enumerate(scanners):
+                sock.send("HB ALIVE")
 
                 # Wait on the join and then check if it's alive
                 s["proc"].join(1)
@@ -416,7 +426,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
 
                     # Resync the device and create another scanner
                     s["dev"] = create_device(s["devstring"], timeout, tries_limit)
-                    s["proc"] = scanner(s["dev"], s["devstring"], s["channel"], channels, verbose, currentGPS, s["kill"])
+                    s["proc"] = scanner(s["dev"], s["devstring"], s["channel"], channels, verbose, currentGPS, s["kill"], s["name"])
 
                     # Add the the list first incase start throws an error so we can kill the new one
                     scanners[i] = s
