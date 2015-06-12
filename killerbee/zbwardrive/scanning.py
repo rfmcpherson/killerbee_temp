@@ -6,6 +6,7 @@ import Queue
 import RPi.GPIO as GPIO
 import signal
 import time
+import traceback
 
 import sys
 import string
@@ -177,8 +178,14 @@ class scanner(multiprocessing.Process):
         beaconp2 = beacon[3:]   # beacon part after seqnum field
         # TODO: Do we want to keep sequence numbers unique across devices? 
         seqnum = 0              # seqnum to use (will cycle)
+
+        import random
         
         while(1):
+            #if(1):
+                #if random.random() < 0.1:
+                #    self.end()
+                #    return
 
             if self.kill.is_set():
                 print "{}: Kill event caught".format(self.devstring)
@@ -229,6 +236,7 @@ class scanner(multiprocessing.Process):
                         self.capture(packet)
             except Exception as e:
                 print "%s: Error in capturing packets (%s)." % (self.devstring,e)
+                print traceback.format_exc()
                 self.end()
                 return 
 
@@ -240,11 +248,19 @@ class scanner(multiprocessing.Process):
     # End and clean up the scanner
     # We don't add the channel back because we can't tell if
     # the process ended gracefully or an uncaught glib error
-    def end(self):
+    def end(self):    
+        '''
         print "{}: Cleaning up".format(self.devstring)
         # TODO: is this all?
-        self.dev.sniffer_off()
-        self.dev.close()
+        try:
+            self.dev.sniffer_off()
+        except Exception as e:
+            print "Sniffer off error: {}".format(e)
+        try:
+            self.dev.close()
+        except Exception as e:
+            print "Close error: {}".format(e)
+        '''
         return
 
     # Captures packets
@@ -322,7 +338,7 @@ def create_device(device_id, timeout=10, tries_limit=5):
         except TimeoutError:
             print "{}: Creation timeout (try={}/{})".format(device_id, tries, tries_limit)
             tries += 1
-            if tries >= retries:
+            if tries >= tries_limit:
                 raise Exception("(%s): Failed to sync" % (device_id))
         finally:
             # TODO: what is this?
@@ -361,42 +377,58 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
         kbdevice = create_device(device[0], timeout, tries_limit)
         
         scanner_proc = scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event)
-        scanners.append((scanner_proc, device[0], channel, kill_event))
+        s = {}
+        s["dev"] = kbdevice
+        s["devstring"] = device[0]
+        s["channel"] = channel
+        s["proc"] = scanner_proc
+        s["kill"] = kill_event
 
-    for scanner_proc, _, _, _ in scanners:
-        scanner_proc.start()
+        scanners.append(s)
+
+    for s in scanners:
+        s["proc"].start()
 
     # TODO: better way to handle this
     # TODO: is it possible that we add the same channel twice?
     try:
         while 1:
-            for i, (scanner_proc, devstring, channel, kill_event) in enumerate(scanners):
+            for i, s in enumerate(scanners):
 
                 # Wait on the join and then check if it's alive
-                scanner_proc.join(1)
-                if not scanner_proc.is_alive():
+                s["proc"].join(1)
+                if not s["proc"].is_alive():
                     # TODO: does reusing this stuff work?
-                    print "{}: Caught error. Respawning".format(devstring)
+                    print "{}: Caught error. Respawning".format(s["devstring"])
                     
                     # Add the cashed channel back to the list
-                    channels.put(channel.value)
-                    channel.value = 0 # don't need to do this
+                    channels.put(s["channel"].value)
+                    s["channel"].value = 0 # don't need to do this
+
+                    try:
+                        s["dev"].sniffer_off()
+                    except Exception as e:
+                        print "{}: Sniffer off error ({})".format(s["devstring"],e)
+                    try:
+                        s["dev"].close()
+                    except Exception as e:
+                        print "{}: Close error ({})".format(s["devstring"],e)
 
                     # Resync the device and create another scanner
-                    kbdevice = create_device(devstring, timeout, tries_limit)
-                    scanner_proc = scanner(kbdevice, devstring, channel, channels, verbose, currentGPS, kill_event)
+                    s["dev"] = create_device(s["devstring"], timeout, tries_limit)
+                    s["proc"] = scanner(s["dev"], s["devstring"], s["channel"], channels, verbose, currentGPS, s["kill"])
 
                     # Add the the list first incase start throws an error so we can kill the new one
-                    scanners[i] = (scanner_proc, devstring, channel, kill_event)
-                    scanners[i][0].start()
+                    scanners[i] = s
+                    scanners[i]["proc"].start()
 
     except KeyboardInterrupt:
         print "doScan() ended by KeyboardInterrupt"
     except Exception as e:
         print "doScan() caught non-Keyboard error: (%s)" % (e)
     finally:
-        for _, _, _, kill_event in scanners:
-            kill_event.set()
+        for s in scanners:
+            s["kill"].set()
         while not channels.empty():
             channels.get()
     

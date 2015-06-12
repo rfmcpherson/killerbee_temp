@@ -276,7 +276,7 @@ class RZUSBSTICK:
                 response = response.pop()
             except usb.core.USBError as e:
                 if e.errno != 110: #Not Operation timed out
-                    print "Error args:", e.args
+                    print "Error args (0):", e.args
                     raise e
                 elif e.errno == 110:
                     print "DEBUG: Received operation timed out error ...attempting to continue."
@@ -446,14 +446,14 @@ class RZUSBSTICK:
             except usb.USBError, e:
                 if e.args != ('No error',): # http://bugs.debian.org/476796
                     if e.args[0] != "Connection timed out": # USB timeout issue
-                        print "Error args:", e.args
+                        print "Error args (1):", e.args
                         raise e
         else: # pyUSB 1.x
             try:
                 pdata = self.dev.read(RZ_USB_PACKET_EP, self.dev.bMaxPacketSize0)#1, 0, 100)
             except usb.core.USBError as e:
                 if e.errno != 110: #Operation timed out
-                    print "Error args:", e.args
+                    print "Error args (2):", e.args
                     raise e
                     #TODO error handling enhancements for USB 1.0
 
