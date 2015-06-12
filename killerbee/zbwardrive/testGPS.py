@@ -1,6 +1,6 @@
-import gps, os, time
+import killerbee.zbwardrive.gps, os, time
 
-session = gps.gps()
+session = killerbee.zbwardrive.gps.gps()
 session.poll()
 session.stream()
 

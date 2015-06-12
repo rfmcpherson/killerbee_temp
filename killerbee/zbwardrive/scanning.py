@@ -3,6 +3,8 @@
 import datetime
 import multiprocessing
 import Queue
+import RPi.GPIO as GPIO
+import signal
 import time
 
 import sys
@@ -153,94 +155,119 @@ def doScan_old(zbdb, currentGPS, verbose=False, dblog=False, agressive=False, st
 
 # TODO: we're currently skipping using dblog for most things
 class scanner(multiprocessing.Process):
-    def __init__(self, device, channels, verbose, dblog, gps):
+    def __init__(self, device, devstring, channel, channels, verbose, gps, kill):
         multiprocessing.Process.__init__(self)
         # TODO: We're assuming that the device can inject
-        self.dev = KillerBee(device=device[0], datasource=("Wardrive Live" if dblog else None))
-        self.devstring = device[1]
+        self.dev = device
+        self.devstring = devstring
         self.channels = channels
-        self.channel = None
+        self.channel = channel
         self.verbose = verbose
         self.gps = gps
+        self.kill = kill
+
 
     def run(self):
-        try:
-            print "Scanning with {}".format(self.devstring)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)        
+        print "Scanning with {}".format(self.devstring)
+        
+        staytime = 2
+        beacon = "\x03\x08\x00\xff\xff\xff\xff\x07" # beacon frame
+        beaconp1 = beacon[0:2]  # beacon part before seqnum field
+        beaconp2 = beacon[3:]   # beacon part after seqnum field
+        # TODO: Do we want to keep sequence numbers unique across devices? 
+        seqnum = 0              # seqnum to use (will cycle)
+        
+        while(1):
 
-            staytime = 2
-            beacon = "\x03\x08\x00\xff\xff\xff\xff\x07" # beacon frame
-            beaconp1 = beacon[0:2]  # beacon part before seqnum field
-            beaconp2 = beacon[3:]   # beacon part after seqnum field
-            # TODO: Do we want to keep sequence numbers unique across devices? 
-            seqnum = 0              # seqnum to use (will cycle)
+            if self.kill.is_set():
+                print "{}: Kill event caught".format(self.devstring)
+                self.end()
+                return
 
-            while(1):
-                
-                # Try to get the next channel, if there aren't any, sleep and try again
-                # It shouldn't be empty unless there are more devices than channels
-                try:
-                    self.channel = self.channels.get(False)
-                except Queue.Empty():
-                    time.sleep(1)
-                    continue
+            # Try to get the next channel, if there aren't any, sleep and try again
+            # It shouldn't be empty unless there are more devices than channels
+            try:
+                self.channel.value = self.channels.get(False)
+            except Queue.Empty():
+                time.sleep(1)
+                continue
 
-                # Change channel
-                try:
-                    self.dev.set_channel(self.channel)
-                except Exception as e:
-                    raise Exception('%s: Failed to set channel to %d (%s).' % (self.devstring,self.channel,e))
-                
-                # Send beacon
-                if seqnum > 255:
-                    seqnum = 0
-                beaconinj = beaconp1 + "%c" % seqnum + beaconp2    
-                if self.verbose:
-                    print "{}: Injecting a beacon request on channel {}".format(self.devstring, self.channel)
-                #try:
+            # Change channel
+            try:
+                self.dev.set_channel(self.channel.value)
+            except Exception as e:
+                print "%s: Failed to set channel to %d (%s)." % (self.devstring, self.channel.value, e)
+                self.end()
+                return
+            
+            # Send beacon
+            if seqnum > 255:
+                seqnum = 0
+            beaconinj = beaconp1 + "%c" % seqnum + beaconp2    
+            if self.verbose:
+                print "{}: Injecting a beacon request on channel {}".format(self.devstring, self.channel.value)
+            try:
                 self.dev.inject(beaconinj)
-                #except Exception, e:
-                #    raise Exception('%s: Unable to inject packet (%s).' % (self.devstring,e))
-                
-                # Listen for packets
-                # TODO: Is there a better way to do this?
-                endtime = time.time() + staytime
+            except Exception, e:
+                print "%s: Unable to inject packet (%s)." % (self.devstring,e)
+                self.end()
+                return
+
+            # Listen for packets
+            # TODO: Is there a better way to do this?
+            endtime = time.time() + staytime
+            
+            try:
                 while (endtime > time.time()):
                     # Get any packets (blocks for 100 usec)
                     packet = self.dev.pnext()
                     # TODO: Do we want the validcrc check?
                     if packet != None:# and packet['validcrc']:
                         if self.verbose:
-                            print "{}: Found a frame on channel {}".format(self.devstring, self.channel)
+                            print "{}: Found a frame on channel {}".format(self.devstring, self.channel.value)
                         self.capture(packet)
+            except Exception as e:
+                print "%s: Error in capturing packets (%s)." % (self.devstring,e)
+                self.end()
+                return 
 
-                self.dev.sniffer_off()
+            self.dev.sniffer_off()
                         
-                # Add channel back to the queue
-                self.channels.put(self.channel)
-        except KeyboardInterrupt:
-            print "{}: Keyboard Interrupt. Cleaning up".format(self.devstring)
-            
-            # TODO: is this all?
-            # TODO: sniffer off
-            self.dev.close()
-            
-            return
+            # Add channel back to the queue
+            self.channels.put(self.channel.value)
 
+    # End and clean up the scanner
+    # We don't add the channel back because we can't tell if
+    # the process ended gracefully or an uncaught glib error
+    def end(self):
+        print "{}: Cleaning up".format(self.devstring)
+        # TODO: is this all?
+        self.dev.sniffer_off()
+        self.dev.close()
+        return
 
     # Captures packets
     # TODO: Make sure the first packet's metadata isn't too drifted
     # TODO: try/except for keyboardinterrupt
     def capture(self, packet, staytime=2):
-        rf_freq_mhz = (self.channel - 10) * 5 + 2400
+
+        #for i in range(5):
+        #    GPIO.output(self.led, True)
+        #    time.sleep(0.1)
+        #    GPIO.output(self.led, False)
+        #    time.sleep(0.1)
+
+        rf_freq_mhz = (self.channel.value - 10) * 5 + 2400
         packet_count = 1
         
         time_label = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M')
-        fname = 'zb_c%s_%s.pcap' % (self.channel, time_label) #fname is -w equiv
+        fname = 'zb_c%s_%s.pcap' % (self.channel.value, time_label) #fname is -w equiv
         pd = PcapDumper(DLT_IEEE802_15_4, fname, ppi=True)
 
         # TODO: make sure below
         #self.dev.sniffer_on() # The sniffer should already be on
-        print "{}: capturing on channel {}".format(self.devstring, self.channel)
+        print "{}: capturing on channel {}".format(self.devstring, self.channel.value)
         
         # Loop and capture packets
         first = True
@@ -277,11 +304,46 @@ class scanner(multiprocessing.Process):
         # All done
         #self.dev.sniffer_off() # gets done later
         pd.close()
-        print "{}: {} packets captured on channel {}".format(self.devstring, packet_count, self.channel)
+        print "{}: {} packets captured on channel {}".format(self.devstring, packet_count, self.channel.value)
 
-                    
+
+# Takes a device id and returns the Zigbee device
+# We make this its own function so we can time it
+# and reset if it takes too long
+# TODO: Better failing
+def create_device(device_id, timeout=10, tries_limit=5):
+    old_handler = signal.signal(signal.SIGALRM, timeoutHandler) 
+    tries = 0    
+    while(1):
+        signal.alarm(10)
+        try:
+            kbdevice = KillerBee(device=device_id)
+            break
+        except TimeoutError:
+            print "{}: Creation timeout (try={}/{})".format(device_id, tries, tries_limit)
+            tries += 1
+            if tries >= retries:
+                raise Exception("(%s): Failed to sync" % (device_id))
+        finally:
+            # TODO: what is this?
+            signal.alarm(0)
+    signal.signal(signal.SIGALRM, old_handler)
+    return kbdevice
+
+
+# http://stackoverflow.com/questions/492519/timeout-on-a-python-function-call
+class TimeoutError(Exception):
+    pass
+
+
+def timeoutHandler(signum, frame):
+    raise TimeoutError()
+
+
 # TODO: how is GPS working?
 def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, staytime=2):
+    timeout = 10
+    tries_limit = 5
 
     # Our pool/semaphor hybrid 
     channels = multiprocessing.Queue()
@@ -290,33 +352,51 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
         channels.put(i)
     
     scanners = []
-    
+
     for device in devices:
-        pass
+        print "Creating {}".format(device[0])
+        kill_event = multiprocessing.Event()
+        channel = multiprocessing.Value('i',0)
+        
+        kbdevice = create_device(device[0], timeout, tries_limit)
+        
+        scanner_proc = scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event)
+        scanners.append((scanner_proc, device[0], channel, kill_event))
 
-    print "{} start".format(devices[0][0])
-    
-    s = scanner(devices[0], channels, verbose, dblog, currentGPS)
-    s.start()
-    scanners.append(s)
-
-    print "{} done".format(devices[0][0])
-    time.sleep(5)
-    print "{} start".format(devices[1][0])
-
-    s = scanner(devices[1], channels, verbose, dblog, currentGPS)
-    s.start()
-    scanners.append(s)
-
-    print "{} done".format(devices[1][0])
+    for scanner_proc, _, _, _ in scanners:
+        scanner_proc.start()
 
     # TODO: better way to handle this
+    # TODO: is it possible that we add the same channel twice?
     try:
-        for s in scanners:
-            s.join()
+        while 1:
+            for i, (scanner_proc, devstring, channel, kill_event) in enumerate(scanners):
+
+                # Wait on the join and then check if it's alive
+                scanner_proc.join(1)
+                if not scanner_proc.is_alive():
+                    # TODO: does reusing this stuff work?
+                    print "{}: Caught error. Respawning".format(devstring)
+                    
+                    # Add the cashed channel back to the list
+                    channels.put(channel.value)
+                    channel.value = 0 # don't need to do this
+
+                    # Resync the device and create another scanner
+                    kbdevice = create_device(devstring, timeout, tries_limit)
+                    scanner_proc = scanner(kbdevice, devstring, channel, channels, verbose, currentGPS, kill_event)
+
+                    # Add the the list first incase start throws an error so we can kill the new one
+                    scanners[i] = (scanner_proc, devstring, channel, kill_event)
+                    scanners[i][0].start()
+
     except KeyboardInterrupt:
         print "doScan() ended by KeyboardInterrupt"
+    except Exception as e:
+        print "doScan() caught non-Keyboard error: (%s)" % (e)
     finally:
+        for _, _, _, kill_event in scanners:
+            kill_event.set()
         while not channels.empty():
             channels.get()
     

@@ -19,8 +19,13 @@ def gpsdPoller(currentGPS):
     @type currentGPS multiprocessing.Manager dict manager
     @arg currentGPS store relavent pieces of up-to-date GPS info
     '''
-    import gps
-    gpsd = gps.gps()
+    import killerbee.zbwardrive.gps
+    import os
+    print os.path.dirname(killerbee.zbwardrive.gps.__file__)
+    gpsd = killerbee.zbwardrive.gps.gps()
+    #print "type: {}".format(type(gpsd))
+    #methods = [method for method in dir(gpsd)]
+    #print "\n".join(methods)
     gpsd.poll()
     gpsd.stream()
 
@@ -51,6 +56,10 @@ def gpsdPoller(currentGPS):
 # Detects attached interfaces
 # Initiates scanning using doScan()
 def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[], ignore=None):
+    print "In startScan()"
+
+    import time
+
     try:
         kb = KillerBee()
     except USBError, e:
@@ -63,8 +72,12 @@ def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[
         print 'Error: Issue starting KillerBee instance:', e
         return False
 
+
+    ignore = "/dev/ttyUSB0"
+    print ignore
+
     devices = kbutils.devlist(gps=ignore, include=include)
-    
+
     for kbdev in devices:
         print 'Found device at %s: \'%s\'' % (kbdev[0], kbdev[1])
         

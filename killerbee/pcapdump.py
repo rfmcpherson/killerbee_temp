@@ -189,7 +189,7 @@ class PcapDumper:
                 if alt > -180000.00005 and alt < 180000.00005:
                     alt_i = int(round((alt + 180000.0) * 1e4))
                 else:
-                    raise Exception("Altitude value is out of expected range: %.8f" % lon)
+                    raise Exception("Altitude value is out of expected range: %.8f" % alt)
                 # Build Geolocation PPI Header
                 caceppi_fgeolocation = ''.join([
                     struct.pack("<H", GPS_TAG),  #2 = Field Type 802.11-Common
