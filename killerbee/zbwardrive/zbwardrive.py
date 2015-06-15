@@ -15,7 +15,7 @@ from scanning import doScan
 GPS_FREQUENCY=3 #in seconds
 
 def googLat(lat):
-    return lat > -180.00000005 and lat < 180.00000005:
+    return lat > -180.00000005 and lat < 180.00000005
 
 def goodLng(lng):
     return goodLat(lng)
@@ -36,8 +36,9 @@ def gpsdPoller(currentGPS):
     gpsd.poll()
     gpsd.stream()
 
-    sock = socket.socket()
-    sock.connect(("127.0.0.1",8080))
+    #sock = socket.socket()
+    #sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    #sock.connect(("127.0.0.1",8080))
 
     try:
         while True:
@@ -46,10 +47,10 @@ def gpsdPoller(currentGPS):
                 lat = gpsd.fix.latitude
                 lng = gpsd.fix.longitude
                 alt = gpsd.fix.altitude
-                if alt:
-                    sock.send("GPS FULL")
-                else:
-                    sock.sock("GPS PARTIAL")
+                #if alt:
+                #    sock.send("GPS FULL")
+                #else:
+                #    sock.send("GPS PARTIAL")
                 #print 'latitude    ' , lat
                 #print 'longitude   ' , lng
                 #TODO do we want to use the GPS time in any way?

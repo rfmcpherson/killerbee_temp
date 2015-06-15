@@ -7,6 +7,9 @@ import signal
 import time
 import traceback
 
+import RPIO
+import RPi.GPIO as GPIO
+
 import sys
 import string
 import socket
@@ -166,15 +169,16 @@ class scanner(multiprocessing.Process):
         self.gps = gps
         self.kill = kill
         self.name = name
-        self.sock = socket.socket()
-        self.sock.connect(("127.0.0.1",8080))
+        #self.sock = socket.socket()
+        #self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        #self.sock.connect(("127.0.0.1",8080))
 
 
     def run(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)        
         print "Scanning with {}".format(self.devstring)
         
-        staytime = 2
+        staytime = 3
         beacon = "\x03\x08\x00\xff\xff\xff\xff\x07" # beacon frame
         beaconp1 = beacon[0:2]  # beacon part before seqnum field
         beaconp2 = beacon[3:]   # beacon part after seqnum field
@@ -268,7 +272,7 @@ class scanner(multiprocessing.Process):
     # Captures packets
     # TODO: Make sure the first packet's metadata isn't too drifted
     # TODO: try/except for keyboardinterrupt
-    def capture(self, packet, staytime=2):
+    def capture(self, packet, staytime=5):
 
         #for i in range(5):
         #    GPIO.output(self.led, True)
@@ -276,7 +280,11 @@ class scanner(multiprocessing.Process):
         #    GPIO.output(self.led, False)
         #    time.sleep(0.1)
 
-        self.socket.send("{} RECEIVING".format(self.name)))
+        #self.sock.send("{} RECEIVING".format(self.name))
+
+        RPIO.output(17,True)
+        time.sleep(0.5)
+        RPIO.output(17,False)
 
         rf_freq_mhz = (self.channel.value - 10) * 5 + 2400
         packet_count = 1
@@ -365,8 +373,14 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     timeout = 10
     tries_limit = 5
 
-    sock = socket.socket()
-    sock.connect(("127.0.0.1", 8080))
+    #sock = socket.socket()
+    #sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    #sock.connect(("127.0.0.1", 8080))
+
+
+    RPIO.setup(17, RPIO.OUT)
+    RPIO.setup(18, RPIO.OUT)
+    RPIO.output(18,False)
 
     # Our pool/semaphor hybrid 
     channels = multiprocessing.Queue()
@@ -403,9 +417,14 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     try:
         while 1:
             for i, s in enumerate(scanners):
-                sock.send("HB ALIVE")
+                RPIO.output(18,True)
+                time.sleep(0.5)
+                RPIO.output(18,False)
+
+                #sock.send("HB ALIVE")
 
                 # Wait on the join and then check if it's alive
+
                 s["proc"].join(1)
                 if not s["proc"].is_alive():
                     # TODO: does reusing this stuff work?
