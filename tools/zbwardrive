@@ -9,6 +9,7 @@ it is selected as 'of interest' which can change based on the -a flag.
 
 import argparse
 from multiprocessing import Process, Manager
+import logging
 
 #from killerbee.zbwardrive import *
 import killerbee.zbwardrive as wd
@@ -30,6 +31,9 @@ if __name__=='__main__':
     parser.add_argument('--ignore', action='store', dest='ignore', default=None)
     args = parser.parse_args()
 
+    logging.basicConfig(filename='zbwardrive.log', level=logging.DEBUG)
+
+
     # try-except block to catch keyboard interrupt.
     gpsp = None
     try:
@@ -48,5 +52,5 @@ if __name__=='__main__':
             agressive=args.agressive, ignore=args.ignore, include=args.include)
 
     except KeyboardInterrupt:
-        print 'Shutting down'
+        logging.debug('Shutting down')
         if gpsp != None: gpsp.terminate()

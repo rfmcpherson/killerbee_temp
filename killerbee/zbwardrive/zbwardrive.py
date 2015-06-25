@@ -7,6 +7,7 @@
 from time import sleep
 from usb import USBError
 from subprocess import call
+import logging
 
 from killerbee import KillerBee, kbutils
 from db import ZBScanDB
@@ -60,41 +61,53 @@ def gpsdPoller(currentGPS):
                 currentGPS['lng'] = lng
                 currentGPS['alt'] = alt
             else:
-                print "Waiting for a GPS fix."
+                log_message = "No GPS fix"
+                logging.debug(log_message)
                 #TODO timeout lat/lng/alt values if too old...?
             sleep(GPS_FREQUENCY)
     except KeyboardInterrupt:
-        print "Got KeyboardInterrupt in gpsdPoller, returning."
+        log_message = "Got KeyboardInterrupt in gpsdPoller, returning." 
+        print log_message
+        logging.debug(log_message)
         return
 
 # startScan
 # Detects attached interfaces
 # Initiates scanning using doScan()
 def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[], ignore=None):
-    print "In startScan()"
-
-    import time
+    logging.debug("In startScan()")
 
     try:
         kb = KillerBee()
     except USBError, e:
         if e.args[0].find('Operation not permitted') >= 0:
-            print 'Error: Permissions error, try running using sudo.'
+            log_message = 'Error: Permissions error, try running using sudo.'
+            logging.warning(log_message)
+            print log_message
         else:
-            print 'Error: USBError:', e
+            log_message = 'Error: USBError: {}'.format(e)
+            logging.warning(log_message)
+            print log_message
         return False
     except Exception, e:
-        print 'Error: Issue starting KillerBee instance:', e
+        log_message = 'Error: Issue starting KillerBee instance: {}'.format(e)
+        logging.warning(log_message)
+        print log_message
         return False
 
+    log_message = "gps: {}".format(ignore)
     if verbose:
-        print "gps: {}".format(ignore)
+        print log_message
+    logging.debug(log_message)
 
     devices = kbutils.devlist(gps=ignore, include=include)
 
     for kbdev in devices:
-        print 'Found device at %s: \'%s\'' % (kbdev[0], kbdev[1])
-        
+        log_message = 'Found device at %s: \'%s\'' % (kbdev[0], kbdev[1])
+        logging.info(log_message)
+        if verbose:
+            print log_message
+
     kb.close()
     doScan(devices, currentGPS, verbose=verbose, dblog=dblog, agressive=agressive)
     return True
