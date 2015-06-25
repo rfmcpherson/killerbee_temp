@@ -7,8 +7,9 @@ import signal
 import time
 import traceback
 
-import RPIO
-import RPi.GPIO as GPIO
+#import RPIO
+#import RPi.GPIO as GPIO
+from mapjson import MapJson
 
 import sys
 import string
@@ -158,7 +159,7 @@ def doScan_old(zbdb, currentGPS, verbose=False, dblog=False, agressive=False, st
 
 # TODO: we're currently skipping using dblog for most things
 class scanner(multiprocessing.Process):
-    def __init__(self, device, devstring, channel, channels, verbose, gps, kill, name):
+    def __init__(self, device, devstring, channel, channels, verbose, gps, kill, name, json_queue):
         multiprocessing.Process.__init__(self)
         # TODO: We're assuming that the device can inject
         self.dev = device
@@ -169,24 +170,25 @@ class scanner(multiprocessing.Process):
         self.gps = gps
         self.kill = kill
         self.name = name
+        self.json_queue = json_queue
         #self.sock = socket.socket()
         #self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         #self.sock.connect(("127.0.0.1",8080))
 
 
     def run(self):
-        signal.signal(signal.SIGINT, signal.SIG_IGN)        
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         print "Scanning with {}".format(self.devstring)
-        
+
         staytime = 3
         beacon = "\x03\x08\x00\xff\xff\xff\xff\x07" # beacon frame
         beaconp1 = beacon[0:2]  # beacon part before seqnum field
         beaconp2 = beacon[3:]   # beacon part after seqnum field
-        # TODO: Do we want to keep sequence numbers unique across devices? 
+        # TODO: Do we want to keep sequence numbers unique across devices?
         seqnum = 0              # seqnum to use (will cycle)
 
         import random
-        
+
         while(1):
             #if(1):
                 #if random.random() < 0.1:
@@ -213,11 +215,11 @@ class scanner(multiprocessing.Process):
                 print "%s: Failed to set channel to %d (%s)." % (self.devstring, self.channel.value, e)
                 self.end()
                 return
-            
+
             # Send beacon
             if seqnum > 255:
                 seqnum = 0
-            beaconinj = beaconp1 + "%c" % seqnum + beaconp2    
+            beaconinj = beaconp1 + "%c" % seqnum + beaconp2
             if self.verbose:
                 print "{}: Injecting a beacon request on channel {}".format(self.devstring, self.channel.value)
             try:
@@ -230,7 +232,7 @@ class scanner(multiprocessing.Process):
             # Listen for packets
             # TODO: Is there a better way to do this?
             endtime = time.time() + staytime
-            
+
             try:
                 while (endtime > time.time()):
                     # Get any packets (blocks for 100 usec)
@@ -244,17 +246,17 @@ class scanner(multiprocessing.Process):
                 print "%s: Error in capturing packets (%s)." % (self.devstring,e)
                 print traceback.format_exc()
                 self.end()
-                return 
+                return
 
             self.dev.sniffer_off()
-                        
+
             # Add channel back to the queue
             self.channels.put(self.channel.value)
 
     # End and clean up the scanner
     # We don't add the channel back because we can't tell if
     # the process ended gracefully or an uncaught glib error
-    def end(self):    
+    def end(self):
         '''
         print "{}: Cleaning up".format(self.devstring)
         # TODO: is this all?
@@ -282,13 +284,13 @@ class scanner(multiprocessing.Process):
 
         #self.sock.send("{} RECEIVING".format(self.name))
 
-        RPIO.output(17,True)
-        time.sleep(0.5)
-        RPIO.output(17,False)
+        #RPIO.output(17,True)
+        #time.sleep(0.5)
+        #RPIO.output(17,False)
 
         rf_freq_mhz = (self.channel.value - 10) * 5 + 2400
         packet_count = 1
-        
+
         time_label = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M')
         fname = 'zb_c%s_%s.pcap' % (self.channel.value, time_label) #fname is -w equiv
         pd = PcapDumper(DLT_IEEE802_15_4, fname, ppi=True)
@@ -296,7 +298,7 @@ class scanner(multiprocessing.Process):
         # TODO: make sure below
         #self.dev.sniffer_on() # The sniffer should already be on
         print "{}: capturing on channel {}".format(self.devstring, self.channel.value)
-        
+
         # Loop and capture packets
         first = True
         endtime = time.time() + staytime
@@ -307,18 +309,27 @@ class scanner(multiprocessing.Process):
             else:
                 # Blocks for 100 usec
                 packet = self.dev.pnext()
-                
+
             if packet != None:
                 packet_count += 1
                 try:
                     # Do the GPS if we can
                     # KB's hack is to use lat to see if all the data is there
                     if self.gps != None and 'lat' in self.gps:
+                        print self.gps['lng'], self.gps['lat']
+
+                        # If we have map data we need to write it to json
+                        map_payload = (packet[0], (self.gps['lng'], self.gps['lat']))
+                        self.json_queue.put(map_payload)
+
                         pd.pcap_dump(packet[0],
-                                     freq_mhz=rf_freq_mhz, ant_dbm=packet['dbm'], 
-                                     location=(self.gps['lng'], self.gps['lat'], self.gps['alt'])   )
+                                     freq_mhz=rf_freq_mhz, ant_dbm=packet['dbm'],
+                                     location=(self.gps['lng'], self.gps['lat'], self.gps['alt']))
                     else:
-                        pd.pcap_dump(packet[0], freq_mhz=rf_freq_mhz, 
+                        map_payload = (packet[0], (1,2))
+                        self.json_queue.put(map_payload)
+                        print "NO GPS - not writing anything to JSON"
+                        pd.pcap_dump(packet[0], freq_mhz=rf_freq_mhz,
                                           ant_dbm=packet['dbm'])
                 except IOError as e:
                     # Below are all killerbee comments
@@ -334,14 +345,13 @@ class scanner(multiprocessing.Process):
         pd.close()
         print "{}: {} packets captured on channel {}".format(self.devstring, packet_count, self.channel.value)
 
-
 # Takes a device id and returns the Zigbee device
 # We make this its own function so we can time it
 # and reset if it takes too long
 # TODO: Better failing
 def create_device(device_id, timeout=10, tries_limit=5):
-    old_handler = signal.signal(signal.SIGALRM, timeoutHandler) 
-    tries = 0    
+    old_handler = signal.signal(signal.SIGALRM, timeoutHandler)
+    tries = 0
     while(1):
         signal.alarm(10)
         try:
@@ -378,16 +388,22 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     #sock.connect(("127.0.0.1", 8080))
 
 
-    RPIO.setup(17, RPIO.OUT)
-    RPIO.setup(18, RPIO.OUT)
-    RPIO.output(18,False)
+    #RPIO.setup(17, RPIO.OUT)
+    #RPIO.setup(18, RPIO.OUT)
+    #RPIO.output(18,False)
 
-    # Our pool/semaphor hybrid 
+    # Our pool/semaphor hybrid
     channels = multiprocessing.Queue()
+
+    # Json mapper
+    json_queue = multiprocessing.Queue()
+    json_kill = multiprocessing.Event()
+    map_json = MapJson(json_queue, json_kill)
+    map_json.start()
 
     for i in range(11,26):
         channels.put(i)
-    
+
     scanners = []
     names = ["KB1", "KB2", "KB3"]
 
@@ -395,10 +411,10 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
         print "Creating {}".format(device[0])
         kill_event = multiprocessing.Event()
         channel = multiprocessing.Value('i',0)
-        
+
         kbdevice = create_device(device[0], timeout, tries_limit)
-        
-        scanner_proc = scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event, name)
+
+        scanner_proc = scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event, name, json_queue)
         s = {}
         s["dev"] = kbdevice
         s["devstring"] = device[0]
@@ -417,9 +433,9 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     try:
         while 1:
             for i, s in enumerate(scanners):
-                RPIO.output(18,True)
-                time.sleep(0.5)
-                RPIO.output(18,False)
+                #RPIO.output(18,True)
+                #time.sleep(0.5)
+                #RPIO.output(18,False)
 
                 #sock.send("HB ALIVE")
 
@@ -429,7 +445,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
                 if not s["proc"].is_alive():
                     # TODO: does reusing this stuff work?
                     print "{}: Caught error. Respawning".format(s["devstring"])
-                    
+
                     # Add the cashed channel back to the list
                     channels.put(s["channel"].value)
                     s["channel"].value = 0 # don't need to do this
@@ -445,7 +461,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
 
                     # Resync the device and create another scanner
                     s["dev"] = create_device(s["devstring"], timeout, tries_limit)
-                    s["proc"] = scanner(s["dev"], s["devstring"], s["channel"], channels, verbose, currentGPS, s["kill"], s["name"])
+                    s["proc"] = scanner(s["dev"], s["devstring"], s["channel"], channels, verbose, currentGPS, s["kill"], s["name"], json_queue)
 
                     # Add the the list first incase start throws an error so we can kill the new one
                     scanners[i] = s
@@ -458,6 +474,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     finally:
         for s in scanners:
             s["kill"].set()
+        json_kill.set()
+        print "Setting map_json kill event"
         while not channels.empty():
             channels.get()
-    
