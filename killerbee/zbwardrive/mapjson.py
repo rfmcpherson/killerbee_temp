@@ -3,6 +3,7 @@ import multiprocessing
 import signal
 import time
 import os
+import uuid
 from killerbee import *
 
 # List of 802.15.4 fields that may or may not be in the packet
@@ -26,7 +27,7 @@ beaconfields = ["Superframe Spec",
                 "TX Offset",
                 "Update ID"]
 
-# List of ZigBeen Network layer fields that may or may not be in the packet
+# List of ZigBee Network layer fields that may or may not be in the packet
 zbnwkfields = ["FCF",
                "Destination Address",
                "Source Address",
@@ -38,7 +39,7 @@ zbnwkfields = ["FCF",
                "Source Route Subframe",
                "Network Payload"]
 
-# List of ZigBeen APS layer fields that may or may not be in the packet
+# List of ZigBee APS layer fields that may or may not be in the packet
 zbapsfields = ["FCF",
                "Destination Endpoint",
                "Group Address",
@@ -47,6 +48,9 @@ zbapsfields = ["FCF",
                "Source Endpoint",
                "APS Counter",
                "APS Payload"]
+
+def bytes2str(b):
+    return "".join("{:02x}".format(ord(c)) for c in b)
 
 class MapJson(multiprocessing.Process):
     # Sets up the multiprocessing parameters needed to
@@ -85,7 +89,7 @@ class MapJson(multiprocessing.Process):
                 return
             # Grab that packet
             new_time = time.time()
-            if (new_time - start_time >= 30) and (not self.feature_collection["features"]):
+            if (new_time - start_time >= 10) and self.feature_collection["features"]:
                 print "MapJson: Capture timeout reached, writing out to file now"
                 self.write_json()
                 self.feature_collection = self.build_feature_collection()
@@ -123,8 +127,7 @@ class MapJson(multiprocessing.Process):
     def detect_fields(self, field_list, packet_fields):
         result_hash = {}
         for field, pkt_field in zip(field_list, packet_fields):
-            if pkt_field:
-                result_hash[field] = pkt_field
+            result_hash[field] = pkt_field
         return result_hash
 
     # This function will attempt to identify all fields available in the packet
@@ -138,6 +141,10 @@ class MapJson(multiprocessing.Process):
         decoded_packet["Dot15d4 Fields"] = self.detect_fields(dot15fields, self.dot15decoder.pktchop(packet))
         if decoded_packet["Dot15d4 Fields"]["Beacon Data"]:
             decoded_packet["Beacon Fields"] = self.detect_fields(beaconfields, decoded_packet["Dot15d4 Fields"]["Beacon Data"])
+        else:
+            decoded_packet["Beacon Fields"] = {}
+            for key in beaconfields:
+                decoded_packet["Beacon Fields"][key] = None # i hate this
         decoded_packet["ZigBee NWK Fields"] = self.detect_fields(zbnwkfields, self.zbnwkdecoder.pktchop(packet))
         decoded_packet["ZigBee APS Fields"] = self.detect_fields(zbapsfields, self.zbapsdecoder.pktchop(packet))
         return decoded_packet
@@ -154,24 +161,69 @@ class MapJson(multiprocessing.Process):
     # Each feature specifies its GPS coordinates along with some
     # visual properties.  It also contains the decoded packet data.
     def build_feature(self, decoded_packet, gps_coords):
+        """
+        Title: 
+        ZigBee Beacon <span class="panid"> 0x7F39</span>
+
+        Description:
+        <hr>
+        Ext PANID: ee:3d:30:f2:0f:1f:52:13 <br>
+        Stack Profile: ZigBee Enterprise <br>
+        Stack Version: ZigBee 2006/2007 <br>
+        Channel: 20 <br>
+        Security Enabled: <strong style="color:red">False</strong> <br><br>
+        <button>Packet capture analysis</button>
+
+        Id: 
+        UUID
+        """
+
+        uid = str(uuid.uuid4()) # hex uuid in the form: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+        if decoded_packet["ZigBee NWK Fields"]:
+            protocol = "Zigbee"
+        else:
+            protocol = "802.15.4"
+
+        if decoded_packet["Dot15d4 Fields"]["Source PAN"]:
+            source_panid = bytes2str(decoded_packet["Dot15d4 Fields"]["Source PAN"])
+        else:
+            source_panid = "Not Identified"
+
         if decoded_packet["Beacon Fields"]["Extended PAN ID"]:
-            ext_panid = decoded_packet["Beacon Fields"]["Extended PAN ID"]
+            ext_panid = bytes2str(decoded_packet["Beacon Fields"]["Extended PAN ID"])
         else:
             ext_panid = "Not Identified"
 
+        if decoded_packet["Dot15d4 Fields"]["Destination PAN"]:
+            dest_panid = bytes2str(decoded_packet["Dot15d4 Fields"]["Destination PAN"])
+        else:
+            dest_panid = "Not Identified"
+
+        '''
         if decoded_packet["ZigBee APS Fields"]["Cluster Identifier"]:
             cluster_id = decoded_packet["ZigBee APS Fields"]["Cluster Identifier"]
         else:
             cluster_id = "Not Identified"
+        '''
+
+        title = 'ZigBee Beacon <span class="panid"> {}</span>'.format(source_panid)
+
+        description = '<hr>\n'
+        description += 'Protocol: {}<br>\n'.format(protocol)
+        description += 'Source PANID: {}<br>\n'.format(source_panid)
+        description += 'Extended Source PANID: {}<br>\n'.format(ext_panid)
+        description += 'Destination PANID: {}<br><br>\n'.format(dest_panid)
+        description += '<button>Packet capture analysis</button>'
 
         # Feature Type
         new_feature = {}
         new_feature["type"] = "Feature"
         # Feature Properties
         new_feature["properties"] = {}
-        new_feature["properties"]["id"] = "Placeholder"
-        new_feature["properties"]["title"] = "Extended PANID: %s, Cluster ID: %s" % ext_panid, cluster_id
-        new_feature["properties"]["description"] = "Placeholder"
+        new_feature["properties"]["id"] = uid
+        new_feature["properties"]["title"] = title
+        new_feature["properties"]["description"] = description
         new_feature["properties"]["marker-size"] = "small"
         new_feature["properties"]["marker-color"] = "#1087bf"
         new_feature["properties"]["marker-symbol"] = "z"
@@ -180,7 +232,7 @@ class MapJson(multiprocessing.Process):
         new_feature["geometry"]["coordinates"] = [gps_coords[0], gps_coords[1]]
         new_feature["geometry"]["type"]  = "Point"
         # Feature ID
-        new_feature["id"] = "Placeholder" # Figure out how to populate this
+        new_feature["id"] = uid
         return new_feature
 
     # Write the current state of the feature_collection out to a json file

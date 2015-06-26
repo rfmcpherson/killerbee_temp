@@ -250,9 +250,10 @@ class scanner(multiprocessing.Process):
                 try:
                     # Do the GPS if we can
                     # KB's hack is to use lat to see if all the data is there
-                    if self.gps != None and 'lat' in self.gps:
+                    if self.gps != None:# and 'lat' in self.gps:
                         # If we have map data we need to write it to json
                         map_payload = (packet[0], (self.gps['lng'], self.gps['lat']))
+                        #map_payload = (packet[0], (90, 90))
                         self.json_queue.put(map_payload)
 
                         pd.pcap_dump(packet[0],
