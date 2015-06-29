@@ -5,6 +5,8 @@ import time
 import os
 import uuid
 from killerbee import *
+import logging
+import Queue
 
 # List of 802.15.4 fields that may or may not be in the packet
 dot15fields = ["FCF",
@@ -59,7 +61,7 @@ class MapJson(multiprocessing.Process):
     # Parameters:
     # queue      - the multiprocessing.Queue that will be used to collect packets
     # kill_event - the even to shut down the process
-    def __init__(self, queue, kill_event):
+    def __init__(self, queue, kill_event, verbose=False):
         multiprocessing.Process.__init__(self)
         if not os.path.exists("./mapjson"):
             print "MapJson: Creating directory to store results"
@@ -68,6 +70,7 @@ class MapJson(multiprocessing.Process):
             print "MapJson: I see you already have this directory, very nice."
         self.queue = queue
         self.kill = kill_event
+        self.verbose = verbose
         self.feature_collection = self.build_feature_collection()
         self.dot15decoder = Dot154PacketParser()
         self.zbnwkdecoder = ZigBeeNWKPacketParser()
@@ -84,24 +87,37 @@ class MapJson(multiprocessing.Process):
         start_time = time.time()
         while 1: # tee hee
             if self.kill.is_set():
-                print "MapJson: Kill event caught ending now"
+                log_message = "MapJson: Kill event caught ending now"
+                if self.verbose:
+                    print log_message
+                logging.debug(log_message)
                 self.end()
                 return
             # Grab that packet
             new_time = time.time()
-            if (new_time - start_time >= 10) and self.feature_collection["features"]:
-                print "MapJson: Capture timeout reached, writing out to file now"
+            if (new_time - start_time >= 30) and self.feature_collection["features"]:
+                log_message = "MapJson: Capture timeout reached, writing out to file now"
+                if self.verbose:
+                    print log_message
+                logging.debug(log_message)
                 self.write_json()
                 self.feature_collection = self.build_feature_collection()
                 start_time = time.time()
             try:
                 payload = self.queue.get(timeout=5)
-            except:
+            except Queue.Empty:
                 continue
             # Add it to the collection
-            decoded_packet = self.decode_packet(payload[0])
+            try:
+                decoded_packet = self.decode_packet(payload[0])
+            except:
+                # We assume anything here is from Scapy/Killerbee not being able to handle the packet
+                continue 
             gps_coords = payload[1]
-            print "MapJson: Adding new packet to the collection"
+            log_message = "MapJson: Adding new packet to the collection"
+            if self.verbose:
+                    print log_message
+            logging.debug(log_message)
             self.feature_collection["features"].append(self.build_feature(decoded_packet, gps_coords))
 
     # This will attempt to process any packets that may still be
@@ -111,7 +127,10 @@ class MapJson(multiprocessing.Process):
         while 1:
             try:
                 payload = self.queue.get(timeout=5)
-                print "MapJson: Adding remaining packet to the collection before exiting"
+                log_message = "MapJson: Adding remaining packet to the collection before exiting"
+                if self.verbose:
+                    print log_message
+                logging.debug(log_message)
                 self.feature_collection["features"].append(self.build_feature(payload))
             except:
                 self.write_json()

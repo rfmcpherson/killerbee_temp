@@ -26,6 +26,8 @@ if __name__=='__main__':
                         help='Initiate capture on channels where packets were seen, even if no beacon response was received')
     parser.add_argument('-g', '--gps', dest='gps', action='store_true',
                         help='Connect to gpsd and grab location data as available to enhance PCAPs')
+    parser.add_argument('-f', '--fake', dest='fake_gps', action='store_true',
+                        help='Fakes a gps device for testing')
     parser.add_argument('-i', '--iface', '--dev', action='append', dest='include')
     #TODO make it be able to ignore a list!
     parser.add_argument('--ignore', action='store', dest='ignore', default=None)
@@ -47,6 +49,11 @@ if __name__=='__main__':
             currentGPS = manager.dict()
             gpsp = Process(target=wd.zbwardrive.gpsdPoller, args=(currentGPS, ))
             gpsp.start()
+        elif args.fake_gps:
+            currentGPS = manager.dict()
+            currentGPS['lng'] = 90.0
+            currentGPS['lat'] = 90.0
+            currentGPS['alt'] = 90.0
 
         #TODO check return value from startScan
         wd.zbwardrive.startScan(currentGPS, verbose=args.verbose, dblog=args.dblog, 

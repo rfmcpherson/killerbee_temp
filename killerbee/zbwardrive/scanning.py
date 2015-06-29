@@ -32,44 +32,6 @@ except ImportError:
 #TODO set iteration min to a sensical parameter
 MIN_ITERATIONS_AGRESSIVE = 0
 
-'''
-# doScan_processResponse
-def doScan_processResponse(packet, channel, zbdb, kbscan, verbose=False, dblog=False):
-    scapyd = Dot15d4(packet['bytes'])
-    # Check if this is a beacon frame
-    if isinstance(scapyd.payload, Dot15d4Beacon):
-        if verbose: print "Received frame is a beacon."
-        try:
-            spanid = scapyd.src_panid
-            source = scapyd.src_addr
-        except Exception as e:
-            print "DEBUG: Issue fetching src panid/addr from scapy packet ({0}).".format(e)
-            print "\t{0}".format(scapyd.summary())
-            print scapyd.show2()
-            print "-"*25
-            return None #ignore this received frame for now
-        key = '%x%x' % (spanid, source)
-        #TODO if channel already being logged, ignore it as something new to capture
-        if zbdb.channel_status_logging(channel) == False:
-            if verbose:
-                print "A network on a channel that is not currently being logged replied to our beacon request."
-            # Store the network in local database so we treat it as already discovered by this program:
-            zbdb.store_networks(key, spanid, source, channel, packet['bytes'])
-            # Log to the mysql db or to the appropriate pcap file
-            if dblog == True:
-                kbscan.dblog.add_packet(full=packet, scapy=scapyd)
-            else:
-                #TODO log this to a PPI pcap file maybe, so the packet is not lost? or print to screen?
-                pass
-            return channel
-        else: #network designated by key is already being logged
-            if verbose:
-                print 'Received frame is a beacon for a network we already found and are logging.'
-                return None
-    else: #frame doesn't look like a beacon according to scapy
-        return None
-# --- end of doScan_processResponse ---
-'''
 
 # TODO: we're currently skipping using dblog for most things
 class scanner(multiprocessing.Process):
@@ -343,7 +305,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     # Json mapper
     json_queue = multiprocessing.Queue()
     json_kill = multiprocessing.Event()
-    map_json = MapJson(json_queue, json_kill)
+    map_json = MapJson(queue=json_queue, kill_event=json_kill, verbose=verbose)
     map_json.start()
 
     for i in range(11,26):
