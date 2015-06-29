@@ -61,20 +61,24 @@ class MapJson(multiprocessing.Process):
     # Parameters:
     # queue      - the multiprocessing.Queue that will be used to collect packets
     # kill_event - the even to shut down the process
-    def __init__(self, queue, kill_event, verbose=False):
+    def __init__(self, queue, kill_event, verbose=False, output='.'):
         multiprocessing.Process.__init__(self)
-        if not os.path.exists("./mapjson"):
-            print "MapJson: Creating directory to store results"
-            os.makedirs("./mapjson")
-        else:
-            print "MapJson: I see you already have this directory, very nice."
         self.queue = queue
         self.kill = kill_event
         self.verbose = verbose
+        self.output = output
+        if self.output[-1] == "/":
+            self.output = self.output[:-1]
+        if not os.path.exists(output+"/mapjson"):
+            print "MapJson: Creating directory to store results"
+            os.makedirs(output+"/mapjson")
+        else:
+            print "MapJson: I see you already have this directory, very nice."
         self.feature_collection = self.build_feature_collection()
         self.dot15decoder = Dot154PacketParser()
         self.zbnwkdecoder = ZigBeeNWKPacketParser()
         self.zbapsdecoder = ZigBeeAPSPacketParser()
+        self.writetime = 10
 
     # Main function that the new process will execute
     # It will loop until the kill signal is set attempting
@@ -95,7 +99,7 @@ class MapJson(multiprocessing.Process):
                 return
             # Grab that packet
             new_time = time.time()
-            if (new_time - start_time >= 30) and self.feature_collection["features"]:
+            if (new_time - start_time >= self.writetime) and self.feature_collection["features"]:
                 log_message = "MapJson: Capture timeout reached, writing out to file now"
                 if self.verbose:
                     print log_message
@@ -257,5 +261,5 @@ class MapJson(multiprocessing.Process):
     # Write the current state of the feature_collection out to a json file
     # that is named according to the current time.
     def write_json(self):
-        with open("./mapjson/map-json-%s.json" % time.strftime("%Y%m%d-%H%M%S"), 'w') as output:
+        with open(self.output+"/mapjson/map-json-%s.json" % time.strftime("%Y%m%d-%H%M%S"), 'w') as output:
             json.dump(self.feature_collection, output)

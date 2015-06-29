@@ -1,6 +1,7 @@
 import struct
 import time
 import math
+import os
 
 PCAPH_MAGIC_NUM = 0xa1b2c3d4
 PCAPH_VER_MAJOR = 2
@@ -104,7 +105,7 @@ class PcapReader:
 
 
 class PcapDumper:
-    def __init__(self, datalink, savefile, ppi = False):
+    def __init__(self, datalink, savefile, ppi = False, folder='.'):
         '''
         Creates a libpcap file using the specified datalink type.
         @type datalink: Integer
@@ -114,8 +115,15 @@ class PcapDumper:
         @rtype: None
         '''
         if ppi: from killerbee.pcapdlt import DLT_PPI
-        self.ppi = ppi
-        self.__fh = open(savefile, mode='wb')
+        self.ppi = ppi        
+        if folder[-1] == "/":
+            folder = folder[:-1]
+        if not os.path.exists(folder+"/pcap"):
+            print "PcapDump: Creating directory to store results"
+            os.makedirs(folder+"/pcap")
+        else:
+            print "PcapDump: I see you already have this directory, very nice."
+        self.__fh = open(folder+"/pcap"+savefile, mode='wb')
         self.datalink = datalink
         self.__fh.write(''.join([
             struct.pack("I", PCAPH_MAGIC_NUM), 

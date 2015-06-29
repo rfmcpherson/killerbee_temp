@@ -74,7 +74,7 @@ def gpsdPoller(currentGPS):
 # startScan
 # Detects attached interfaces
 # Initiates scanning using doScan()
-def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[], ignore=None):
+def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[], ignore=None, output='.'):
     logging.debug("In startScan()")
 
     try:
@@ -108,6 +108,11 @@ def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[
         if verbose:
             print log_message
 
+    log_message = "Sending output to {}".format(output)
+    if verbose:
+        print log_message
+    logging.info(log_message)
+
     kb.close()
-    doScan(devices, currentGPS, verbose=verbose, dblog=dblog, agressive=agressive)
+    doScan(devices, currentGPS, verbose=verbose, dblog=dblog, agressive=agressive, output=output)
     return True

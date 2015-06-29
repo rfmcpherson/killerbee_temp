@@ -34,8 +34,8 @@ MIN_ITERATIONS_AGRESSIVE = 0
 
 
 # TODO: we're currently skipping using dblog for most things
-class scanner(multiprocessing.Process):
-    def __init__(self, device, devstring, channel, channels, verbose, gps, kill, json_queue):
+class Scanner(multiprocessing.Process):
+    def __init__(self, device, devstring, channel, channels, verbose, gps, kill, json_queue, output):
         multiprocessing.Process.__init__(self)
         # TODO: We're assuming that the device can inject
         self.dev = device
@@ -47,6 +47,7 @@ class scanner(multiprocessing.Process):
         self.kill = kill
         #self.name = name
         self.json_queue = json_queue
+        self.output = output
         #self.sock = socket.socket()
         #self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         #self.sock.connect(("127.0.0.1",8080))
@@ -186,8 +187,8 @@ class scanner(multiprocessing.Process):
         packet_count = 1
 
         time_label = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M')
-        fname = 'zb_c%s_%s.pcap' % (self.channel.value, time_label) #fname is -w equiv
-        pd = PcapDumper(DLT_IEEE802_15_4, fname, ppi=True)
+        fname = '/zb_c%s_%s.pcap' % (self.channel.value, time_label) #fname is -w equiv
+        pd = PcapDumper(DLT_IEEE802_15_4, fname, ppi=True, folder=self.output)
 
         # TODO: make sure below
         #self.dev.sniffer_on() # The sniffer should already be on
@@ -286,7 +287,7 @@ def timeoutHandler(signum, frame):
 
 
 # TODO: how is GPS working?
-def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, staytime=2):
+def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, staytime=2, output='.'):
     timeout = 10
     tries_limit = 5
 
@@ -305,7 +306,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
     # Json mapper
     json_queue = multiprocessing.Queue()
     json_kill = multiprocessing.Event()
-    map_json = MapJson(queue=json_queue, kill_event=json_kill, verbose=verbose)
+    map_json = MapJson(queue=json_queue, kill_event=json_kill, verbose=verbose, output=output)
     map_json.start()
 
     for i in range(11,26):
@@ -324,7 +325,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
 
         kbdevice = create_device(device[0], verbose=verbose, timeout=timeout, tries_limit=tries_limit)
 
-        scanner_proc = scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event, json_queue)
+        scanner_proc = Scanner(kbdevice, device[0], channel, channels,  verbose, currentGPS, kill_event, json_queue, output)
         s = {}
         s["dev"] = kbdevice
         s["devstring"] = device[0]
@@ -380,7 +381,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False, agressive=False, sta
 
                     # Resync the device and create another scanner
                     s["dev"] = create_device(s["devstring"], verbose=verbose, timeout=timeout, tries_limit=tries_limit)
-                    s["proc"] = scanner(s["dev"], s["devstring"], s["channel"], channels, verbose, currentGPS, s["kill"], json_queue)
+                    s["proc"] = Scanner(s["dev"], s["devstring"], s["channel"], channels, verbose, currentGPS, s["kill"], json_queue, output)
 
                     # Add the the list first incase start throws an error so we can kill the new one
                     scanners[i] = s
