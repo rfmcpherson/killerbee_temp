@@ -85,7 +85,7 @@ class Scanner(multiprocessing.Process):
             # It shouldn't be empty unless there are more devices than channels
             try:
                 self.channel.value = self.channels.get(False)
-            except Queue.Empty():
+            except Queue.Empty:
                 time.sleep(1)
                 continue
 
