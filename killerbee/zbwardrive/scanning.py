@@ -15,7 +15,6 @@ import traceback
 from capture import startCapture
 from db import toHex
 from killerbee import *
-from mapjson import MapJson
 try:
     from scapy.all import Dot15d4, Dot15d4Beacon
 except ImportError:
