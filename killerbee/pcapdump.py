@@ -1,7 +1,8 @@
-import struct
-import time
+import logging
 import math
 import os
+import struct
+import time
 
 PCAPH_MAGIC_NUM = 0xa1b2c3d4
 PCAPH_VER_MAJOR = 2
@@ -119,10 +120,9 @@ class PcapDumper:
         if folder[-1] == "/":
             folder = folder[:-1]
         if not os.path.exists(folder+"/pcap"):
-            print "PcapDump: Creating directory to store results"
+            log_message = "PcapDump: Creating directory to store results"
+            logging.debug(log_message)
             os.makedirs(folder+"/pcap")
-        else:
-            print "PcapDump: I see you already have this directory, very nice."
         self.__fh = open(folder+"/pcap"+savefile, mode='wb')
         self.datalink = datalink
         self.__fh.write(''.join([
@@ -248,11 +248,6 @@ class PcapDumper:
 
         output_list.append(packet)
         output = ''.join(output_list)
-
-        #DEBUG Output:
-        #print "Pcap:", '\\x'+'\\x'.join(["%02x" % ord(x) for x in output])
-        #print "PPI:", '\\x'+'\\x'.join(["%02x" % ord(x) for x in (caceppi_hdr + caceppi_f80211common)])
-        #print "802154:", packet.encode("hex")
 
         self.__fh.write(output)
         # Specially for handling FIFO needs:

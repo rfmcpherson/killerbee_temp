@@ -4,13 +4,14 @@
 # rmspeers 2010-13
 # ZigBee/802.15.4 WarDriving Platform
 
+
+import logging
+from subprocess import call
 from time import sleep
 from usb import USBError
-from subprocess import call
-import logging
 
-from killerbee import KillerBee, kbutils
 from db import ZBScanDB
+from killerbee import KillerBee, kbutils
 from scanning import doScan
 
 GPS_FREQUENCY=3 #in seconds
@@ -37,10 +38,6 @@ def gpsdPoller(currentGPS):
     gpsd.poll()
     gpsd.stream()
 
-    #sock = socket.socket()
-    #sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    #sock.connect(("127.0.0.1",8080))
-
     try:
         while True:
             gpsd.poll()
@@ -48,21 +45,15 @@ def gpsdPoller(currentGPS):
                 lat = gpsd.fix.latitude
                 lng = gpsd.fix.longitude
                 alt = gpsd.fix.altitude
-                #if alt:
-                #    sock.send("GPS FULL")
-                #else:
-                #    sock.send("GPS PARTIAL")
-                #print 'latitude    ' , lat
-                #print 'longitude   ' , lng
-                #TODO do we want to use the GPS time in any way?
                 #print 'time utc    ' , gpsd.utc,' + ', gpsd.fix.time
-                #print 'altitude (m)' , alt
                 currentGPS['lat'] = lat
                 currentGPS['lng'] = lng
                 currentGPS['alt'] = alt
+                log_message = "GPS: {}, {}, {}".format(lat, lng, alt)
+                logging.debug(log_message)
             else:
                 log_message = "No GPS fix"
-                logging.debug(log_message)
+                logging.info(log_message)
                 #TODO timeout lat/lng/alt values if too old...?
             sleep(GPS_FREQUENCY)
     except KeyboardInterrupt:
@@ -74,7 +65,8 @@ def gpsdPoller(currentGPS):
 # startScan
 # Detects attached interfaces
 # Initiates scanning using doScan()
-def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[], ignore=None, output='.'):
+def startScan(currentGPS, verbose=False, dblog=False, agressive=False,
+              include=[], ignore=None, output='.'):
     logging.debug("In startScan()")
 
     try:
@@ -82,23 +74,23 @@ def startScan(currentGPS, verbose=False, dblog=False, agressive=False, include=[
     except USBError, e:
         if e.args[0].find('Operation not permitted') >= 0:
             log_message = 'Error: Permissions error, try running using sudo.'
-            logging.warning(log_message)
+            logging.error(log_message)
             print log_message
         else:
             log_message = 'Error: USBError: {}'.format(e)
-            logging.warning(log_message)
+            logging.error(log_message)
             print log_message
         return False
     except Exception, e:
         log_message = 'Error: Issue starting KillerBee instance: {}'.format(e)
-        logging.warning(log_message)
+        logging.error(log_message)
         print log_message
         return False
 
     log_message = "gps: {}".format(ignore)
     if verbose:
         print log_message
-    logging.debug(log_message)
+    logging.info(log_message)
 
     devices = kbutils.devlist(gps=ignore, include=include)
 
