@@ -34,6 +34,10 @@ if __name__=='__main__':
                         help='Device to skip. Used as GPS if -g flag is set')
     parser.add_argument('-o', '--out', action='store', dest='output', default='/home/pi/data',
                         help='Where to write any output files')
+    parser.add_argument('-s', '--scanningtime', action='store', dest='scanning_time', default=5,
+                        help='Amount of time to wait on a channel to see if it\'s used')
+    parser.add_argument('-c', '--channeltime', action='store', dest='channel_time', default=5,
+                        help='Amount of time to record packets on a channel')
     args = parser.parse_args()
 
     # TODO: make logging and logging location a flag
@@ -61,7 +65,9 @@ if __name__=='__main__':
 
         # TODO: check return value from startScan 
         wd.zbwardrive.startScan(currentGPS, verbose=args.verbose, dblog=args.dblog, 
-            agressive=args.agressive, ignore=args.ignore, include=args.include, output=args.output)
+                                agressive=args.agressive, ignore=args.ignore, 
+                                include=args.include, output=args.output,
+                                scanning_time=int(args.scanning_time), channel_time=int(args.channel_time))
 
     except KeyboardInterrupt:
         if args.verbose:

@@ -26,24 +26,25 @@ except ImportError:
 
 #TODO set iteration min to a sensical parameter
 MIN_ITERATIONS_AGRESSIVE = 0
-CHANNEL_WAIT_TIME = 3 # How long to wait on a channel to see a packet
-CAPTURE_WAIT_TIME = 5 # How long to capture packets on a channel
 
 # TODO: we're currently skipping using dblog for most things
 # TODO: We're assuming that the device can inject
+# ug... so many parameters
 class Scanner(multiprocessing.Process):
     def __init__(self, device, devstring, channel, channels,
-                 verbose, currentGPS, kill, json_queue, output):
+                 verbose, currentGPS, kill, output,
+                 scanning_time, channel_time):
         multiprocessing.Process.__init__(self)
         self.dev = device             # KB device
         self.devstring = devstring    # Name of the device (for logging) 
         self.channels = channels      # Shared queue of channels
         self.channel = channel        # Shared memory of current channel
         self.verbose = verbose        # Verbose flag
-        self.currentGPS = currentGPS   # Shared memorf of GPS data
+        self.currentGPS = currentGPS  # Shared memorf of GPS data
         self.kill = kill              # Kill event
-        self.json_queue = json_queue  # Queue of packets to be writting to JSON
         self.output = output          # Output folder
+        self.scanning_time = scanning_time  # How long to wait on a channel to see if it's active
+        self.channel_time = channel_time    # How long to record on an active channel
 
     def run(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -105,7 +106,7 @@ class Scanner(multiprocessing.Process):
                 return
 
             # Listen for packets
-            endtime = time.time() + CHANNEL_WAIT_TIME
+            endtime = time.time() + self.scanning_time
             try:
                 while (endtime > time.time()):
                     # Get any packets (blocks for 100 usec)
@@ -145,7 +146,7 @@ class Scanner(multiprocessing.Process):
         logging.debug(log_message)
 
         # Loop and capture packets
-        endtime = time.time() + CAPTURE_WAIT_TIME
+        endtime = time.time() + self.channel_time
         while(endtime > time.time()):
             packet = self.dev.pnext()
             if packet != None:
@@ -231,19 +232,11 @@ def create_device(device_id, verbose=False, timeout=10, tries_limit=5):
 
 
 def doScan(devices, currentGPS, verbose=False, dblog=False,
-           agressive=False, output='.'):
+           agressive=False, output='.', scanning_time=5, channel_time=5):
     timeout = 10    # How long to wait for each zigbee device to sync
     tries_limit = 5 # How many retries to give a zigbee device to sync
     scanners = []   # Stored information about each Scanner class we spawn
     channels = multiprocessing.Queue() # Keeps track of channels
-
-    # Json mapper
-    json_queue = multiprocessing.Queue()
-    json_kill = multiprocessing.Event()
-    map_json = MapJson(
-        queue=json_queue, kill_event=json_kill,
-        verbose=verbose, output=output)
-    map_json.start()
 
     # Add the channels to the queue
     for i in range(11,26):
@@ -264,7 +257,8 @@ def doScan(devices, currentGPS, verbose=False, dblog=False,
             tries_limit=tries_limit)
         scanner_proc = Scanner(
             kbdevice, device[0], channel, channels,  verbose,
-            currentGPS, kill_event, json_queue, output)
+            currentGPS, kill_event, output, 
+            scanning_time, channel_time)
 
         # Add scanner information to scanners list
         s = {}
@@ -323,7 +317,8 @@ def doScan(devices, currentGPS, verbose=False, dblog=False,
                         timeout=timeout, tries_limit=tries_limit)
                     s["proc"] = Scanner(
                         s["dev"], s["devstring"], s["channel"], channels,
-                        verbose, currentGPS, s["kill"], json_queue, output)
+                        verbose, currentGPS, s["kill"], output,
+                        scanning_time, channel_time)
 
                     # Add the the list first incase start throws an error
                     # We can kill/redo the new one
@@ -343,10 +338,6 @@ def doScan(devices, currentGPS, verbose=False, dblog=False,
         # Kill off all the children processes
         for s in scanners:
             s["kill"].set()
-        json_kill.set()
-        log_message = "Setting map_json kill event"
-        if verbose:
-            print log_message
         logging.debug(log_message)
         while not channels.empty():
             channels.get()
