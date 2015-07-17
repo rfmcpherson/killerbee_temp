@@ -33,7 +33,7 @@ MIN_ITERATIONS_AGRESSIVE = 0
 class Scanner(multiprocessing.Process):
     def __init__(self, device, devstring, channel, channels,
                  verbose, currentGPS, kill, output,
-                 scanning_time, channel_time):
+                 scanning_time, capture_time):
         multiprocessing.Process.__init__(self)
         self.dev = device             # KB device
         self.devstring = devstring    # Name of the device (for logging) 
@@ -44,7 +44,7 @@ class Scanner(multiprocessing.Process):
         self.kill = kill              # Kill event
         self.output = output          # Output folder
         self.scanning_time = scanning_time  # How long to wait on a channel to see if it's active
-        self.channel_time = channel_time    # How long to record on an active channel
+        self.capture_time = capture_time    # How long to record on an active channel
 
     def run(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -90,6 +90,7 @@ class Scanner(multiprocessing.Process):
             if seqnum > 255:
                 seqnum = 0
             beaconinj = beaconp1 + "%c" % seqnum + beaconp2
+            seqnum += 1
             log_message = "{}: Injecting a beacon request on channel {}".format(
                 self.devstring, self.channel.value) 
             if self.verbose:
@@ -146,16 +147,16 @@ class Scanner(multiprocessing.Process):
         logging.debug(log_message)
 
         # Loop and capture packets
-        endtime = time.time() + self.channel_time
+        endtime = time.time() + self.capture_time
         while(endtime > time.time()):
             packet = self.dev.pnext()
             if packet != None:
                 packet_count += 1
                 self.dump_packet(pdump, packet)
-            else:
-                log_message = "Frame is none, how did that happen? (ch: {})".format(
-                    self.channel.value)
-                logging.warning(log_message)
+            #else:
+            #    log_message = "Frame is none, how did that happen? (ch: {})".format(
+            #        self.channel.value)
+            #    logging.warning(log_message)
 
         # All done
         pdump.close()
@@ -232,7 +233,7 @@ def create_device(device_id, verbose=False, timeout=10, tries_limit=5):
 
 
 def doScan(devices, currentGPS, verbose=False, dblog=False,
-           agressive=False, output='.', scanning_time=5, channel_time=5):
+           agressive=False, output='.', scanning_time=2, capture_time=5):
     timeout = 10    # How long to wait for each zigbee device to sync
     tries_limit = 5 # How many retries to give a zigbee device to sync
     scanners = []   # Stored information about each Scanner class we spawn
@@ -258,7 +259,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False,
         scanner_proc = Scanner(
             kbdevice, device[0], channel, channels,  verbose,
             currentGPS, kill_event, output, 
-            scanning_time, channel_time)
+            scanning_time, capture_time)
 
         # Add scanner information to scanners list
         s = {}
@@ -278,7 +279,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False,
     # (The Ravensticks occasionally suffer glib errors)
     try:
         while 1:
-            for s in scanners:
+            for i, s in enumerate(scanners):
                 
                 # Wait on the join and then start it again if it died
                 s["proc"].join(1)
@@ -318,7 +319,7 @@ def doScan(devices, currentGPS, verbose=False, dblog=False,
                     s["proc"] = Scanner(
                         s["dev"], s["devstring"], s["channel"], channels,
                         verbose, currentGPS, s["kill"], output,
-                        scanning_time, channel_time)
+                        scanning_time, capture_time)
 
                     # Add the the list first incase start throws an error
                     # We can kill/redo the new one
@@ -330,7 +331,8 @@ def doScan(devices, currentGPS, verbose=False, dblog=False,
             print log_message
         logging.info(log_message)
     except Exception as e:
-        log_message = "doScan() caught non-Keyboard error: (%s)" % (e)
+        log_message = "doScan() caught non-Keyboard error: (%s)\n" % (e)
+        log_message += traceback.format_exc()
         if verbose:
             print log_message
         logging.warning(log_message)
