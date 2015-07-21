@@ -14,7 +14,7 @@ from db import ZBScanDB
 from killerbee import KillerBee, kbutils
 from scanning import doScan
 
-GPS_FREQUENCY=3 #in seconds
+GPS_FREQUENCY=0.9 #in seconds
 
 def googLat(lat):
     return lat > -180.00000005 and lat < 180.00000005
@@ -45,11 +45,16 @@ def gpsdPoller(currentGPS):
                 lat = gpsd.fix.latitude
                 lng = gpsd.fix.longitude
                 alt = gpsd.fix.altitude
+                eph = gpsd.fix.epx
+                epv = gpsd.fix.epv
+                ept = gpsd.fix.ept
+                gpt = gpsd.fix.time
                 #print 'time utc    ' , gpsd.utc,' + ', gpsd.fix.time
                 currentGPS['lat'] = lat
                 currentGPS['lng'] = lng
                 currentGPS['alt'] = alt
-                log_message = "GPS: {}, {}, {}".format(lat, lng, alt)
+                log_message = "GPS: {}, {}, {}\n     {} epx:{} epv:{} ept:{}".format(lat, lng, alt, gpt, eph, epv, ept)
+                print log_message
                 logging.debug(log_message)
             else:
                 log_message = "No GPS fix"
