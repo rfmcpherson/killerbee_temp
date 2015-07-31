@@ -12,7 +12,6 @@ import sys
 import time
 import traceback
 
-from capture import startCapture
 from db import toHex
 from killerbee import *
 try:
