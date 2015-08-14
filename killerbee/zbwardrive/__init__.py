@@ -6,5 +6,4 @@ from killerbee import *
 from db import *
 from scanning import doScan
 from zbwardrive import startScan
-from capture import *
 

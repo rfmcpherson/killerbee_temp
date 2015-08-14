@@ -16,7 +16,7 @@ from scanning import doScan
 
 GPS_FREQUENCY=0.9 #in seconds
 
-def googLat(lat):
+def goodLat(lat):
     return lat > -180.00000005 and lat < 180.00000005
 
 def goodLng(lng):
@@ -60,7 +60,7 @@ def gpsdPoller(currentGPS):
                 log_message = "No GPS fix"
                 logging.info(log_message)
                 #TODO timeout lat/lng/alt values if too old...?
-            sleep(GPS_FREQUENCY)
+            #sleep(GPS_FREQUENCY)
     except KeyboardInterrupt:
         log_message = "Got KeyboardInterrupt in gpsdPoller, returning." 
         print log_message
