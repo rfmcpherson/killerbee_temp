@@ -14,7 +14,8 @@ from db import ZBScanDB
 from killerbee import KillerBee, kbutils
 from scanning import doScan
 
-def googLat(lat):
+
+def goodLat(lat):
     return lat > -180.00000005 and lat < 180.00000005
 
 def goodLng(lng):
